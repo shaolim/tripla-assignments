@@ -77,15 +77,15 @@ docker run --rm -v $(pwd):/rails interview-app ./bin/rails test test/services/ci
 
 The project includes comprehensive tests covering all components:
 
-| Test File | Description | Tests |
-|-----------|-------------|-------|
-| `pricing_controller_test.rb` | Request handling, validation, error responses | 27 |
-| `pricing_flow_test.rb` | End-to-end integration tests | 17 |
-| `pricing_service_test.rb` | API integration, cache key generation | 14 |
-| `leader_follower_cache_test.rb` | Caching, coordination, fallback logic | 13 |
-| `circuit_breaker_test.rb` | Failure detection, state transitions | 12 |
-| `distributed_lock_test.rb` | Lock acquisition, release, ownership | 8 |
-| `async_request_test.rb` | Follower wait mechanism, timeouts | 10 |
+| Test File                       | Description                                   | Tests |
+| ------------------------------- | --------------------------------------------- | ----- |
+| `pricing_controller_test.rb`    | Request handling, validation, error responses | 27    |
+| `pricing_flow_test.rb`          | End-to-end integration tests                  | 17    |
+| `pricing_service_test.rb`       | API integration, cache key generation         | 14    |
+| `leader_follower_cache_test.rb` | Caching, coordination, fallback logic         | 13    |
+| `circuit_breaker_test.rb`       | Failure detection, state transitions          | 12    |
+| `distributed_lock_test.rb`      | Lock acquisition, release, ownership          | 8     |
+| `async_request_test.rb`         | Follower wait mechanism, timeouts             | 10    |
 
 **Total: 98 tests, 287 assertions**
 
@@ -99,11 +99,11 @@ Fetches the current rate for a hotel room.
 
 **Parameters:**
 
-| Parameter | Required | Valid Values |
-|-----------|----------|--------------|
-| `period`  | Yes      | `Summer`, `Autumn`, `Winter`, `Spring` |
+| Parameter | Required | Valid Values                                              |
+| --------- | -------- | --------------------------------------------------------- |
+| `period`  | Yes      | `Summer`, `Autumn`, `Winter`, `Spring`                    |
 | `hotel`   | Yes      | `FloatingPointResort`, `GitawayHotel`, `RecursionRetreat` |
-| `room`    | Yes      | `SingletonRoom`, `BooleanTwin`, `RestfulKing` |
+| `room`    | Yes      | `SingletonRoom`, `BooleanTwin`, `RestfulKing`             |
 
 **Success Response (200):**
 ```json
@@ -112,11 +112,11 @@ Fetches the current rate for a hotel room.
 
 **Error Responses:**
 
-| Status | Description |
-|--------|-------------|
-| 400    | Missing or invalid parameters |
+| Status | Description                             |
+| ------ | --------------------------------------- |
+| 400    | Missing or invalid parameters           |
 | 503    | Pricing service temporarily unavailable |
-| 500    | Unexpected server error |
+| 500    | Unexpected server error                 |
 
 **Example Error:**
 ```json
@@ -208,6 +208,8 @@ Request → Check Cache → [Hit] → Return cached rate
 3. **Resource efficiency** - BRPOP eliminates polling; only leader calls API
 4. **Handles 10,000+ requests** - With 5-minute cache TTL, each unique parameter combination needs at most 288 API calls/day (24h × 60min / 5min = 288)
 
+> **POC Reference:** All three approaches were prototyped and benchmarked in a standalone proof-of-concept before implementing the final solution. See [github.com/shaolim/callapi](https://github.com/shaolim/callapi) for the detailed comparison, including the technical design document.
+
 ### Architecture
 
 ```
@@ -225,26 +227,26 @@ Request → Check Cache → [Hit] → Return cached rate
 
 ### Component Overview
 
-| Component | Responsibility |
-|-----------|---------------|
-| `PricingController` | Request validation, error handling |
-| `PricingService` | API integration, cache key generation |
+| Component             | Responsibility                        |
+| --------------------- | ------------------------------------- |
+| `PricingController`   | Request validation, error handling    |
+| `PricingService`      | API integration, cache key generation |
 | `LeaderFollowerCache` | Coordination, caching, fallback logic |
-| `DistributedLock` | Redis-based lock with auto-extension |
-| `AsyncRequest` | Follower wait mechanism using BRPOP |
-| `CircuitBreaker` | Failure detection and recovery |
+| `DistributedLock`     | Redis-based lock with auto-extension  |
+| `AsyncRequest`        | Follower wait mechanism using BRPOP   |
+| `CircuitBreaker`      | Failure detection and recovery        |
 
 ### Configuration
 
-| Constant | Value | Rationale |
-|----------|-------|-----------|
-| Cache TTL | 300s (5 min) | Per requirements |
-| Stale TTL | 900s (15 min) | Fallback buffer |
-| Follower timeout | 15s | User-friendly wait time |
-| Lock TTL | 60s | Accommodates slow APIs |
-| Lock extend interval | 2s | Keeps lock alive during long calls |
-| Circuit breaker threshold | 5 failures | Opens after repeated failures |
-| Circuit breaker timeout | 60s | Time before retry |
+| Constant                  | Value         | Rationale                          |
+| ------------------------- | ------------- | ---------------------------------- |
+| Cache TTL                 | 300s (5 min)  | Per requirements                   |
+| Stale TTL                 | 900s (15 min) | Fallback buffer                    |
+| Follower timeout          | 15s           | User-friendly wait time            |
+| Lock TTL                  | 60s           | Accommodates slow APIs             |
+| Lock extend interval      | 2s            | Keeps lock alive during long calls |
+| Circuit breaker threshold | 5 failures    | Opens after repeated failures      |
+| Circuit breaker timeout   | 60s           | Time before retry                  |
 
 ---
 
@@ -333,11 +335,11 @@ docker run --rm -v $(pwd):/rails interview-app ./bin/rails test test/controllers
 
 ### Environment Variables
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `API_TOKEN` | Token for rate-api authentication | (required) |
-| `REDIS_URL` | Redis connection URL | `redis://localhost:6379` |
-| `RATE_API_URL` | Rate API endpoint | `http://rate-api:8080/pricing` |
+| Variable       | Description                       | Default                        |
+| -------------- | --------------------------------- | ------------------------------ |
+| `API_TOKEN`    | Token for rate-api authentication | (required)                     |
+| `REDIS_URL`    | Redis connection URL              | `redis://localhost:6379`       |
+| `RATE_API_URL` | Rate API endpoint                 | `http://rate-api:8080/pricing` |
 
 ---
 
