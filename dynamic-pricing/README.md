@@ -63,9 +63,31 @@ Expected response:
 # Build the test image
 docker build -t interview-app .
 
-# Run the test suite
+# Run the full test suite (98 tests, 287 assertions)
 docker run --rm -v $(pwd):/rails interview-app ./bin/rails test
+
+# Run specific test files
+docker run --rm -v $(pwd):/rails interview-app ./bin/rails test test/controllers/pricing_controller_test.rb
+docker run --rm -v $(pwd):/rails interview-app ./bin/rails test test/services/circuit_breaker_test.rb
 ```
+
+---
+
+## Test Coverage
+
+The project includes comprehensive tests covering all components:
+
+| Test File | Description | Tests |
+|-----------|-------------|-------|
+| `pricing_controller_test.rb` | Request handling, validation, error responses | 27 |
+| `pricing_flow_test.rb` | End-to-end integration tests | 17 |
+| `pricing_service_test.rb` | API integration, cache key generation | 14 |
+| `leader_follower_cache_test.rb` | Caching, coordination, fallback logic | 13 |
+| `circuit_breaker_test.rb` | Failure detection, state transitions | 12 |
+| `distributed_lock_test.rb` | Lock acquisition, release, ownership | 8 |
+| `async_request_test.rb` | Follower wait mechanism, timeouts | 10 |
+
+**Total: 98 tests, 287 assertions**
 
 ---
 
@@ -252,19 +274,28 @@ The service will fail gracefully with a 503 error. In production, Redis should b
 dynamic-pricing/
 ├── app/
 │   ├── controllers/
-│   │   └── pricing_controller.rb    # Request handling and validation
+│   │   └── pricing_controller.rb       # Request handling and validation
 │   └── services/
-│       ├── pricing_service.rb       # Main service, API integration
-│       ├── leader_follower_cache.rb # Caching with coordination
-│       ├── distributed_lock.rb      # Redis-based distributed lock
-│       ├── async_request.rb         # Follower wait mechanism
-│       └── circuit_breaker.rb       # Failure protection
+│       ├── pricing_service.rb          # Main service, API integration
+│       ├── leader_follower_cache.rb    # Caching with coordination
+│       ├── distributed_lock.rb         # Redis-based distributed lock
+│       ├── async_request.rb            # Follower wait mechanism
+│       └── circuit_breaker.rb          # Failure protection
 ├── config/
-│   └── routes.rb                    # GET /pricing endpoint
+│   └── routes.rb                       # GET /pricing endpoint
 ├── test/
-│   └── controllers/
-│       └── pricing_controller_test.rb
-├── docker-compose.yml               # Full stack: app, rate-api, redis
+│   ├── test_helper.rb                  # Test configuration and MockRedis
+│   ├── controllers/
+│   │   └── pricing_controller_test.rb  # Controller unit tests
+│   ├── integration/
+│   │   └── pricing_flow_test.rb        # End-to-end integration tests
+│   └── services/
+│       ├── async_request_test.rb       # AsyncRequest unit tests
+│       ├── circuit_breaker_test.rb     # CircuitBreaker unit tests
+│       ├── distributed_lock_test.rb    # DistributedLock unit tests
+│       ├── leader_follower_cache_test.rb # Cache unit tests
+│       └── pricing_service_test.rb     # PricingService unit tests
+├── docker-compose.yml                  # Full stack: app, rate-api, redis
 ├── Dockerfile
 ├── Gemfile
 └── .env.example
