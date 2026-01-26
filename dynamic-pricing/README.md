@@ -73,24 +73,6 @@ docker run --rm -v $(pwd):/rails interview-app ./bin/rails test test/services/ci
 
 ---
 
-## Test Coverage
-
-The project includes comprehensive tests covering all components:
-
-| Test File                       | Description                                   | Tests |
-| ------------------------------- | --------------------------------------------- | ----- |
-| `pricing_controller_test.rb`    | Request handling, validation, error responses | 27    |
-| `pricing_flow_test.rb`          | End-to-end integration tests                  | 17    |
-| `pricing_service_test.rb`       | API integration, cache key generation         | 14    |
-| `leader_follower_cache_test.rb` | Caching, coordination, fallback logic         | 13    |
-| `circuit_breaker_test.rb`       | Failure detection, state transitions          | 12    |
-| `distributed_lock_test.rb`      | Lock acquisition, release, ownership          | 8     |
-| `async_request_test.rb`         | Follower wait mechanism, timeouts             | 10    |
-
-**Total: 98 tests, 287 assertions**
-
----
-
 ## API Reference
 
 ### GET /pricing
