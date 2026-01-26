@@ -10,11 +10,22 @@ class PricingController < ApplicationController
     hotel  = params[:hotel]
     room   = params[:room]
 
-    # TODO: Start to implement here
-    render json: { rate: "12000" }
+    result = pricing_service.fetch_pricing(period: period, hotel: hotel, room: room)
+    render json: result
+  rescue PricingService::ApiError => e
+    render json: { error: e.message }, status: e.code.to_i
+  rescue PricingService::Error => e
+    render json: { error: e.message }, status: :service_unavailable
+  rescue StandardError => e
+    Rails.logger.error { "Unexpected error in PricingController: #{e.class} - #{e.message}" }
+    render json: { error: 'An unexpected error occurred. Please try again.' }, status: :internal_server_error
   end
 
   private
+
+  def pricing_service
+    PricingService.instance
+  end
 
   def validate_params
     # Validate required parameters

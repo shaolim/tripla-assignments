@@ -11,8 +11,11 @@ gem "sqlite3", ">= 1.4"
 # Use the Puma web server [https://github.com/puma/puma]
 gem "puma", ">= 5.0"
 
-# Use Redis adapter to run Action Cable in production
-# gem "redis", ">= 4.0.1"
+# Use Redis adapter for caching and distributed coordination
+gem "redis", ">= 4.0.1"
+
+# Async support for leader-follower pattern
+gem "async"
 
 # Use Kredis to get higher-level data types in Redis [https://github.com/rails/kredis]
 # gem "kredis"
@@ -35,6 +38,9 @@ group :development, :test do
 
   # Load environment variables from .env file
   gem "dotenv-rails"
+
+  # Mocking for tests
+  gem "mocha"
 end
 
 group :development do
