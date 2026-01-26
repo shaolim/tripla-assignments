@@ -1,0 +1,43 @@
+services:
+  rate-api:
+    image: tripladev/rate-api:latest
+    networks:
+      - pricing-network
+    ports:
+      - "8080:8080"
+
+  redis:
+    image: redis:7-alpine
+    networks:
+      - pricing-network
+    ports:
+      - "6379:6379"
+
+  development:
+    build: .
+    depends_on:
+      rate-api:
+        condition: service_started
+      redis:
+        condition: service_started
+    environment:
+      - API_TOKEN=${API_TOKEN}
+      - REDIS_URL=redis://redis:6379
+    networks:
+      - pricing-network
+    ports:
+      - "3000:3000"
+    volumes:
+      - .:/rails
+    develop:
+      watch:
+        - action: sync+restart
+          path: .
+          target: /app
+          ignore:
+            - docker-compose.yml
+            - Dockerfile
+
+networks:
+  pricing-network:
+    driver: bridge
