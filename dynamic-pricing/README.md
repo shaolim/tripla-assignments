@@ -154,7 +154,6 @@ Request → Check Cache → [Miss] → Try Lock
 
 **Cons:**
 - No fallback on API failure
-- Long timeout (55s) hurts user experience
 
 #### Approach 3: Enhanced Leader-Follower with Circuit Breaker (Chosen)
 
@@ -176,7 +175,6 @@ Request → Check Cache → [Hit] → Return cached rate
 - All benefits of Approach 2
 - Circuit breaker prevents cascade failures
 - Stale cache provides graceful degradation
-- Shorter timeout (15s) for better UX
 - Exponential backoff on retries
 
 **Cons:**
@@ -186,9 +184,8 @@ Request → Check Cache → [Hit] → Return cached rate
 ### Why I Chose Approach 3
 
 1. **Production-ready reliability** - Circuit breaker handles the intermittent errors mentioned in the requirements
-2. **Optimal user experience** - 15-second timeout is reasonable; users always get a response
-3. **Resource efficiency** - BRPOP eliminates polling; only leader calls API
-4. **Handles 10,000+ requests** - With 5-minute cache TTL, each unique parameter combination needs at most 288 API calls/day (24h × 60min / 5min = 288)
+2. **Resource efficiency** - BRPOP eliminates polling; only leader calls API
+3. **Handles 10,000+ requests** - With 5-minute cache TTL, each unique parameter combination needs at most 288 API calls/day (24h × 60min / 5min = 288)
 
 > **POC Reference:** All three approaches were prototyped and benchmarked in a standalone proof-of-concept before implementing the final solution. See [github.com/shaolim/callapi](https://github.com/shaolim/callapi) for the detailed comparison, including the technical design document.
 
