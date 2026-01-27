@@ -21,7 +21,7 @@ services:
       redis:
         condition: service_started
     environment:
-      - API_TOKEN=${API_TOKEN}
+      - API_TOKEN=${API_TOKEN:-test-token}
       - REDIS_URL=redis://redis:6379
       - RATE_API_URL=http://rate-api:8080/pricing
     networks:
