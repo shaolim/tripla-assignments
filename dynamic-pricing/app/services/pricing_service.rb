@@ -3,13 +3,6 @@ require 'json'
 require 'uri'
 require 'digest'
 
-# PricingService using Leader-Follower pattern
-# Optimized for the Tripla case requirements:
-# - Handles expensive API operations (auto-extending lock)
-# - Respects rate limits (circuit breaker, no duplicate calls)
-# - Graceful degradation (stale cache fallback)
-# - User-friendly timeouts (15s instead of 55s)
-# - Production-ready error handling
 class PricingService
   DEFAULT_API_URL = ENV.fetch('RATE_API_URL', 'http://rate-api:8080/pricing').freeze
   CACHE_PREFIX = 'pricing:'.freeze
@@ -47,11 +40,6 @@ class PricingService
     @cache = LeaderFollowerCache.new(redis: redis, logger: @logger, ttl: CACHE_TTL)
   end
 
-  # Fetch pricing for a single room
-  # @param period [String] Season period (Summer, Autumn, Winter, Spring)
-  # @param hotel [String] Hotel name
-  # @param room [String] Room type
-  # @return [Hash] Pricing data with rate
   def fetch_pricing(period:, hotel:, room:)
     attributes = { period: period, hotel: hotel, room: room }
     cache_key = build_cache_key(attributes)
@@ -60,7 +48,6 @@ class PricingService
       fetch_from_api([attributes])
     end
 
-    # The API returns an array, extract the first result
     extract_rate(result, attributes)
   rescue AsyncRequest::Timeout => e
     @logger.error { "[PricingService] Follower timeout: #{e.message}" }
@@ -73,7 +60,6 @@ class PricingService
     raise Error, 'Pricing service is temporarily unavailable. Please try again later.'
   end
 
-  # Reset circuit breaker (for manual intervention)
   def reset_circuit_breaker
     @cache.reset_circuit_breaker
   end
@@ -125,8 +111,6 @@ class PricingService
   end
 
   def extract_rate(result, attributes)
-    # The API returns {"rates": [...]} with pricing results
-    # Find the matching result for our attributes
     rates = result.is_a?(Hash) ? result['rates'] : result
 
     if rates.is_a?(Array) && rates.any?

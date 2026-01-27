@@ -1,7 +1,6 @@
 require 'async'
 require 'securerandom'
 
-# Distributed lock with automatic extension for long-running operations
 class DistributedLock
   class LockError < StandardError; end
 
@@ -16,8 +15,6 @@ class DistributedLock
     @owner = nil
   end
 
-  # Acquires lock and executes block with automatic lock extension
-  # Raises LockError if lock cannot be acquired or is lost during execution
   def with_lock(&block)
     acquire_lock!
 
@@ -63,7 +60,6 @@ class DistributedLock
   end
 
   def extend_lock_if_owner?
-    # Use Lua script for atomic check-and-extend
     script = <<~LUA
       if redis.call('GET', KEYS[1]) == ARGV[1] then
         return redis.call('EXPIRE', KEYS[1], ARGV[2])
@@ -77,7 +73,6 @@ class DistributedLock
   end
 
   def release_lock
-    # Use Lua script for atomic check-and-delete
     script = <<~LUA
       if redis.call('GET', KEYS[1]) == ARGV[1] then
         return redis.call('DEL', KEYS[1])

@@ -1,5 +1,3 @@
-# Circuit Breaker pattern to prevent cascade failures
-# Opens circuit after threshold failures, preventing further attempts
 class CircuitBreaker
   class CircuitBreakerError < StandardError; end
 

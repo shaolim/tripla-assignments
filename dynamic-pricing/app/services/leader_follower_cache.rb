@@ -1,12 +1,7 @@
 require 'json'
 require 'timeout'
 
-# Enhanced Leader-Follower cache coordination pattern
-# Prevents stampeding herd problem when cache expires
-# - Only one request (leader) fetches from external API
-# - Other requests (followers) wait for leader's result
-# - Circuit breaker prevents cascade failures
-# - Stale cache fallback for resilience
+
 class LeaderFollowerCache
   DEFAULT_TTL = 300 # 5 minutes (per requirements)
   STALE_TTL = 900 # 15 minutes (keep stale for fallback)
@@ -27,33 +22,26 @@ class LeaderFollowerCache
     )
   end
 
-  # Fetch with enhanced leader-follower coordination
-  # Returns cached value, fresh value, or stale value as fallback
   def fetch(key, &block)
-    # Check cache first
     cached = get(key)
     return cached if cached
 
-    # Check circuit breaker - if open, use stale cache
     if @circuit_breaker.open?
       @logger.warn { "Circuit breaker open for key: #{key}, using fallback" }
       return fallback_value(key)
     end
 
-    # Try to become leader
     lock = DistributedLock.new(@redis, lock_key(key))
 
     begin
       @logger.info { "Attempting to become leader for key: #{key}" }
 
       lock.with_lock do
-        # Double-check cache after acquiring lock
         cached = get(key)
         return cached if cached
 
         @logger.info { "Became leader for key: #{key}" }
 
-        # Execute with circuit breaker and timeout
         result = @circuit_breaker.call do
           execute_with_timeout(&block)
         end
@@ -68,20 +56,16 @@ class LeaderFollowerCache
         result
       end
     rescue DistributedLock::LockError => e
-      # Failed to acquire lock, become follower
       @logger.info { "Became follower for key: #{key}" }
       execute_as_follower_with_retry(key)
     rescue CircuitBreaker::CircuitBreakerError => e
-      # Circuit breaker open, use fallback
       @logger.error { "Circuit breaker error for key #{key}: #{e.message}" }
       fallback_value(key)
     rescue Timeout::Error => e
-      # API timeout, record failure and use fallback
       @logger.error { "API timeout for key #{key}: #{e.message}" }
       @circuit_breaker.record_failure
       fallback_value(key)
     rescue StandardError => e
-      # Unexpected error, record failure and use fallback
       @logger.error { "Unexpected error for key #{key}: #{e.class} - #{e.message}" }
       @circuit_breaker.record_failure
       fallback_value(key)
@@ -107,15 +91,6 @@ class LeaderFollowerCache
   def delete(key)
     @redis.del(key)
     @redis.del(stale_key(key))
-  end
-
-  # Get circuit breaker state for monitoring
-  def circuit_breaker_state
-    {
-      state: @circuit_breaker.state,
-      failure_count: @circuit_breaker.failure_count,
-      last_failure: @circuit_breaker.last_failure_time
-    }
   end
 
   # Reset circuit breaker (useful for manual intervention)

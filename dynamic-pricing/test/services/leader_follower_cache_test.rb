@@ -45,15 +45,6 @@ class LeaderFollowerCacheTest < ActiveSupport::TestCase
     assert_nil result
   end
 
-  test "returns circuit breaker state" do
-    state = @cache.circuit_breaker_state
-
-    assert_includes state.keys, :state
-    assert_includes state.keys, :failure_count
-    assert_includes state.keys, :last_failure
-    assert_equal :closed, state[:state]
-  end
-
   test "reset_circuit_breaker delegates to circuit breaker" do
     # Open the circuit breaker first by simulating failures
     breaker = @cache.instance_variable_get(:@circuit_breaker)
