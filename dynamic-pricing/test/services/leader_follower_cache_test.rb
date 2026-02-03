@@ -27,14 +27,12 @@ class LeaderFollowerCacheTest < ActiveSupport::TestCase
     assert_equal '{"rate":100}', stored
   end
 
-  test "deletes key and stale key" do
+  test "deletes key" do
     @mock_redis.set("test:key", "value")
-    @mock_redis.set("stale:test:key", "stale_value")
 
     @cache.delete("test:key")
 
     assert_nil @mock_redis.get("test:key")
-    assert_nil @mock_redis.get("stale:test:key")
   end
 
   test "handles invalid JSON in cache gracefully" do
@@ -45,43 +43,6 @@ class LeaderFollowerCacheTest < ActiveSupport::TestCase
     assert_nil result
   end
 
-  test "reset_circuit_breaker delegates to circuit breaker" do
-    # Open the circuit breaker first by simulating failures
-    breaker = @cache.instance_variable_get(:@circuit_breaker)
-    5.times { breaker.record_failure }
-
-    assert breaker.open?
-
-    @cache.reset_circuit_breaker
-
-    assert breaker.closed?
-  end
-
-  test "uses stale cache when circuit breaker is open" do
-    # Open the circuit breaker
-    breaker = @cache.instance_variable_get(:@circuit_breaker)
-    5.times { breaker.record_failure }
-
-    # Setup stale cache
-    @mock_redis.set("stale:test:key", '{"rate": 9999}')
-
-    result = @cache.fetch("test:key") { raise "should not call API" }
-
-    assert_equal({ "rate" => 9999 }, result)
-  end
-
-  test "raises error when no fallback available" do
-    # Open the circuit breaker
-    breaker = @cache.instance_variable_get(:@circuit_breaker)
-    5.times { breaker.record_failure }
-
-    # No cache at all
-
-    assert_raises(PricingService::Error) do
-      @cache.fetch("test:key") { raise "should not call API" }
-    end
-  end
-
   test "fetches and caches value when cache miss" do
     result = @cache.fetch("new:key") { { "rate" => 500 } }
 
@@ -90,10 +51,6 @@ class LeaderFollowerCacheTest < ActiveSupport::TestCase
     # Verify it was cached
     cached = @mock_redis.get("new:key")
     assert_equal '{"rate":500}', cached
-
-    # Verify stale copy was created
-    stale = @mock_redis.get("stale:new:key")
-    assert_equal '{"rate":500}', stale
   end
 
   test "returns cached value on subsequent fetch" do
@@ -131,7 +88,6 @@ class LeaderFollowerCacheWithMocksTest < ActiveSupport::TestCase
 
     # Cache the result
     mock_redis.stubs(:set).with("test:key", anything, ex: anything)
-    mock_redis.stubs(:set).with("stale:test:key", anything, ex: anything)
 
     # Simulate followers waiting - return queue names then nil
     mock_redis.stubs(:rpop).with("waiters:test:key")
@@ -141,6 +97,7 @@ class LeaderFollowerCacheWithMocksTest < ActiveSupport::TestCase
 
     # Notify followers
     mock_redis.stubs(:lpush)
+    mock_redis.stubs(:expire)
 
     # Cleanup
     mock_redis.stubs(:del)
@@ -151,31 +108,27 @@ class LeaderFollowerCacheWithMocksTest < ActiveSupport::TestCase
     assert_equal({ "rate" => 500 }, result)
   end
 
-  test "becomes follower when lock acquisition fails and uses stale cache on timeout" do
+  test "raises error when follower times out" do
     mock_redis = mock('redis')
 
-    # Cache miss for fresh data
+    # Cache miss
     mock_redis.stubs(:get).with("test:key").returns(nil)
-
-    # Stale cache exists
-    mock_redis.stubs(:get).with("stale:test:key").returns('{"rate": 111}')
 
     # Lock acquisition fails
     mock_redis.expects(:set).with("lock:test:key", anything, nx: true, ex: 60).returns(nil)
 
     # Follower registration
     mock_redis.stubs(:lpush)
-    mock_redis.stubs(:expire)
     mock_redis.stubs(:del)
 
-    # BRPOP times out (returns nil), then retries also timeout
+    # BRPOP times out (returns nil)
     mock_redis.stubs(:brpop).returns(nil)
 
     cache = LeaderFollowerCache.new(redis: mock_redis, ttl: 300)
-    result = cache.fetch("test:key") { raise "leader should not run" }
 
-    # Should return stale cache after follower timeout
-    assert_equal({ "rate" => 111 }, result)
+    assert_raises(PricingService::Error) do
+      cache.fetch("test:key") { raise "leader should not run" }
+    end
   end
 
   test "follower receives result from leader via BRPOP" do
@@ -189,7 +142,6 @@ class LeaderFollowerCacheWithMocksTest < ActiveSupport::TestCase
 
     # Follower registration
     mock_redis.stubs(:lpush)
-    mock_redis.stubs(:expire)
     mock_redis.stubs(:del)
 
     # BRPOP returns result from leader

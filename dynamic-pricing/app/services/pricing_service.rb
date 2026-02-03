@@ -55,13 +55,6 @@ class PricingService
   rescue DistributedLock::LockError => e
     @logger.error { "[PricingService] Lock error: #{e.message}" }
     raise Error, 'Unable to coordinate price calculation. Please retry.'
-  rescue CircuitBreaker::CircuitBreakerError => e
-    @logger.error { "[PricingService] Circuit breaker open: #{e.message}" }
-    raise Error, 'Pricing service is temporarily unavailable. Please try again later.'
-  end
-
-  def reset_circuit_breaker
-    @cache.reset_circuit_breaker
   end
 
   private

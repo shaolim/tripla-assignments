@@ -7,7 +7,6 @@ class AsyncRequestTest < ActiveSupport::TestCase
 
   test "creates request with unique waiter queue" do
     @mock_redis.stubs(:lpush)
-    @mock_redis.stubs(:expire)
 
     request1 = AsyncRequest.new("cache:key", redis: @mock_redis)
     request2 = AsyncRequest.new("cache:key", redis: @mock_redis)
@@ -18,22 +17,13 @@ class AsyncRequestTest < ActiveSupport::TestCase
 
   test "registers in waiters list on create" do
     @mock_redis.expects(:lpush).with("waiters:cache:key", anything)
-    @mock_redis.expects(:expire).with(anything, 60) # timeout + 5
 
     AsyncRequest.create("cache:key", redis: @mock_redis, timeout: 55)
   end
 
-  test "sets expiration on waiter queue" do
-    @mock_redis.stubs(:lpush)
-    @mock_redis.expects(:expire).with(anything, 25) # 20 + 5
-
-    AsyncRequest.create("cache:key", redis: @mock_redis, timeout: 20)
-  end
-
   test "wait returns parsed JSON result" do
     @mock_redis.stubs(:lpush)
-    @mock_redis.stubs(:expire)
-    @mock_redis.stubs(:del)
+        @mock_redis.stubs(:del)
     @mock_redis.expects(:brpop).returns(["queue", '{"rate": 12000}'])
 
     request = AsyncRequest.create("cache:key", redis: @mock_redis, timeout: 5)
@@ -44,8 +34,7 @@ class AsyncRequestTest < ActiveSupport::TestCase
 
   test "raises Timeout when BRPOP returns nil" do
     @mock_redis.stubs(:lpush)
-    @mock_redis.stubs(:expire)
-    @mock_redis.stubs(:del)
+        @mock_redis.stubs(:del)
     @mock_redis.expects(:brpop).returns(nil)
 
     request = AsyncRequest.create("cache:key", redis: @mock_redis, timeout: 5)
@@ -60,8 +49,7 @@ class AsyncRequestTest < ActiveSupport::TestCase
 
   test "cleans up waiter queue after successful wait" do
     @mock_redis.stubs(:lpush)
-    @mock_redis.stubs(:expire)
-    @mock_redis.stubs(:brpop).returns(["queue", '{"rate": 100}'])
+        @mock_redis.stubs(:brpop).returns(["queue", '{"rate": 100}'])
     @mock_redis.expects(:del).at_least_once
 
     request = AsyncRequest.create("cache:key", redis: @mock_redis)
@@ -70,8 +58,7 @@ class AsyncRequestTest < ActiveSupport::TestCase
 
   test "cleans up waiter queue after timeout" do
     @mock_redis.stubs(:lpush)
-    @mock_redis.stubs(:expire)
-    @mock_redis.stubs(:brpop).returns(nil)
+        @mock_redis.stubs(:brpop).returns(nil)
     @mock_redis.expects(:del).at_least_once
 
     request = AsyncRequest.create("cache:key", redis: @mock_redis, timeout: 1)
@@ -81,8 +68,7 @@ class AsyncRequestTest < ActiveSupport::TestCase
 
   test "raises error on invalid JSON payload" do
     @mock_redis.stubs(:lpush)
-    @mock_redis.stubs(:expire)
-    @mock_redis.stubs(:del)
+        @mock_redis.stubs(:del)
     @mock_redis.expects(:brpop).returns(["queue", "not valid json"])
 
     request = AsyncRequest.create("cache:key", redis: @mock_redis)
@@ -101,8 +87,7 @@ class AsyncRequestTest < ActiveSupport::TestCase
     }
 
     @mock_redis.stubs(:lpush)
-    @mock_redis.stubs(:expire)
-    @mock_redis.stubs(:del)
+        @mock_redis.stubs(:del)
     @mock_redis.expects(:brpop).returns(["queue", complex_response.to_json])
 
     request = AsyncRequest.create("cache:key", redis: @mock_redis)
@@ -113,8 +98,7 @@ class AsyncRequestTest < ActiveSupport::TestCase
 
   test "uses correct timeout for BRPOP" do
     @mock_redis.stubs(:lpush)
-    @mock_redis.stubs(:expire)
-    @mock_redis.stubs(:del)
+        @mock_redis.stubs(:del)
     @mock_redis.expects(:brpop).with(anything, timeout: 30).returns(["queue", '{}'])
 
     request = AsyncRequest.create("cache:key", redis: @mock_redis, timeout: 30)
@@ -123,8 +107,7 @@ class AsyncRequestTest < ActiveSupport::TestCase
 
   test "stores key reference" do
     @mock_redis.stubs(:lpush)
-    @mock_redis.stubs(:expire)
-
+    
     request = AsyncRequest.new("my:special:key", redis: @mock_redis)
 
     assert_equal "my:special:key", request.key

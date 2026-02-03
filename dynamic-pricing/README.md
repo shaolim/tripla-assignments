@@ -16,8 +16,7 @@ This solution implements a dynamic pricing proxy service that efficiently caches
 
 - **5-minute caching** - Rates are cached for exactly 5 minutes as required
 - **Leader-Follower pattern** - Prevents duplicate API calls under concurrent load
-- **Circuit breaker** - Protects against cascade failures when upstream API is unhealthy
-- **Graceful degradation** - Returns stale cached data when fresh data is unavailable
+- **No stale prices** - Only fresh cached data is served, never outdated prices
 - **User-friendly timeouts** - 15-second timeout instead of indefinite waits
 
 ---
@@ -63,12 +62,12 @@ Expected response:
 # Build the test image
 docker build -t interview-app .
 
-# Run the full test suite (98 tests, 287 assertions)
+# Run the full test suite
 docker run --rm -v $(pwd):/rails interview-app ./bin/rails test
 
 # Run specific test files
 docker run --rm -v $(pwd):/rails interview-app ./bin/rails test test/controllers/pricing_controller_test.rb
-docker run --rm -v $(pwd):/rails interview-app ./bin/rails test test/services/circuit_breaker_test.rb
+docker run --rm -v $(pwd):/rails interview-app ./bin/rails test test/services/leader_follower_cache_test.rb
 ```
 
 ---
@@ -122,7 +121,15 @@ The challenge presents several constraints that guided the design:
 
 I evaluated three approaches before settling on the final solution:
 
-#### Approach 1: Simple Mutex Lock + Polling
+#### Approach 1: Rails Cache
+
+**Pros:** 
+- Simple to implement
+
+**Cons:**
+- Cache Stampede when timeout
+
+#### Approach 2: Distributed Locking + Polling
 
 ```
 Request → Check Cache → [Miss] → Try Lock → Call API → Cache → Release
@@ -130,14 +137,13 @@ Request → Check Cache → [Miss] → Try Lock → Call API → Cache → Relea
                               [Locked] → Poll cache every 100ms
 ```
 
-**Pros:** Simple to implement
+**Pros:** 
+- Simple to implement
+
 **Cons:**
 - Inefficient polling wastes resources
-- Unsafe lock release (no ownership verification)
-- Thundering herd on timeout (all waiting requests hit API)
-- No fallback on API failure
 
-#### Approach 2: Leader-Follower with BRPOP
+#### Approach 3: Leader-Follower with distributed locking (Chosen)
 
 ```
 Request → Check Cache → [Miss] → Try Lock
@@ -152,42 +158,81 @@ Request → Check Cache → [Miss] → Try Lock
 - Safe lock with ownership verification
 - Auto-extending locks for slow APIs
 
-**Cons:**
-- No fallback on API failure
-
-#### Approach 3: Enhanced Leader-Follower with Circuit Breaker (Chosen)
-
-```
-Request → Check Cache → [Hit] → Return cached rate
-              ↓
-           [Miss] → Check Circuit Breaker
-                          ↓
-              [Open] → Return stale cache
-                          ↓
-              [Closed] → Acquire Lock
-                              ↓
-                  [Leader] → Call API → Cache → Notify followers
-                              ↓
-                  [Follower] → BRPOP with retry → Return result
-```
-
-**Pros:**
-- All benefits of Approach 2
-- Circuit breaker prevents cascade failures
-- Stale cache provides graceful degradation
-- Exponential backoff on retries
-
-**Cons:**
-- More complex implementation
-- May return stale data in failure scenarios
-
 ### Why I Chose Approach 3
 
-1. **Production-ready reliability** - Circuit breaker handles the intermittent errors mentioned in the requirements
-2. **Resource efficiency** - BRPOP eliminates polling; only leader calls API
-3. **Handles 10,000+ requests** - With 5-minute cache TTL, each unique parameter combination needs at most 288 API calls/day (24h × 60min / 5min = 288)
+1. **Resource efficiency** - BRPOP eliminates polling; only leader calls API
+2. **Handles 10,000+ requests** - With 5-minute cache TTL, each unique parameter combination needs at most 288 API calls/day (24h × 60min / 5min = 288)
 
-> **POC Reference:** All three approaches were prototyped and benchmarked in a standalone proof-of-concept before implementing the final solution. See [github.com/shaolim/callapi](https://github.com/shaolim/callapi) for the detailed comparison, including the technical design document.
+> **POC Reference:** All three approaches were prototyped in a standalone proof-of-concept before implementing the final solution. See [github.com/shaolim/callapi](https://github.com/shaolim/callapi) for the detailed comparison, including the technical design document.
+
+### Sequence Diagram
+
+The following diagram illustrates how concurrent requests are coordinated using the leader-follower pattern:
+
+```mermaid
+sequenceDiagram
+    participant R1 as Request 1
+    participant R2 as Request 2
+    participant Cache as Redis Cache
+    participant Lock as Redis Lock
+    participant API as Rate API
+
+    Note over R1,R2: Two concurrent requests for same cache key
+
+    %% Both requests check cache
+    R1->>Cache: GET pricing:key
+    R2->>Cache: GET pricing:key
+    Cache-->>R1: nil (cache miss)
+    Cache-->>R2: nil (cache miss)
+
+    %% Leader election
+    R1->>Lock: SET lock:key (NX, EX 60)
+    R2->>Lock: SET lock:key (NX, EX 60)
+    Lock-->>R1: OK (acquired - becomes Leader)
+    Lock-->>R2: nil (failed - becomes Follower)
+
+    %% Follower registers its unique queue and waits
+    Note over R2: Generate unique queue: waiter:uuid
+    R2->>Cache: LPUSH waiters:key, "waiter:uuid"
+    Note over R2: Block waiting for result
+    R2->>Cache: BRPOP waiter:uuid (max 15s)
+
+    %% Leader fetches from API (with concurrent lock extension)
+    R1->>API: POST /pricing
+
+    par Lock Keep-Alive (background task)
+        loop Every 2 seconds while API call in progress
+            R1->>Lock: EVAL "if GET==owner then EXPIRE 60"
+            Lock-->>R1: 1 (extended)
+        end
+    end
+
+    API-->>R1: {"rates": [...]}
+
+    %% Leader caches result
+    R1->>Cache: SET pricing:key (EX 300)
+
+    %% Leader notifies waiting followers
+    R1->>Cache: RPOP waiters:key
+    Cache-->>R1: "waiter:uuid"
+    Note over R1: Push result to follower's queue
+    R1->>Cache: LPUSH waiter:uuid, result
+
+    %% Follower's BRPOP unblocks with result
+    Cache-->>R2: [waiter:uuid, result]
+
+    %% Leader releases lock
+    R1->>Lock: DEL lock:key (if owner)
+
+    Note over R1,R2: Both requests return same result
+```
+
+**Key Points:**
+- **Leader Election**: First request to acquire lock (`SET NX`) becomes leader
+- **Lock Auto-Extension**: Background task extends lock every 2s using Lua script (checks ownership before extending)
+- **Efficient Waiting**: Followers use `BRPOP` which blocks without CPU usage (max 15s)
+- **Direct Notification**: Leader pushes result directly to each follower's queue
+- **Follower Timeout**: If follower times out after 15s, returns 503 error (no stale prices served)
 
 ### Architecture
 
@@ -210,22 +255,18 @@ Request → Check Cache → [Hit] → Return cached rate
 | --------------------- | ------------------------------------- |
 | `PricingController`   | Request validation, error handling    |
 | `PricingService`      | API integration, cache key generation |
-| `LeaderFollowerCache` | Coordination, caching, fallback logic |
+| `LeaderFollowerCache` | Coordination and caching logic        |
 | `DistributedLock`     | Redis-based lock with auto-extension  |
 | `AsyncRequest`        | Follower wait mechanism using BRPOP   |
-| `CircuitBreaker`      | Failure detection and recovery        |
 
 ### Configuration
 
-| Constant                  | Value         | Rationale                          |
-| ------------------------- | ------------- | ---------------------------------- |
-| Cache TTL                 | 300s (5 min)  | Per requirements                   |
-| Stale TTL                 | 900s (15 min) | Fallback buffer                    |
-| Follower timeout          | 15s           | User-friendly wait time            |
-| Lock TTL                  | 60s           | Accommodates slow APIs             |
-| Lock extend interval      | 2s            | Keeps lock alive during long calls |
-| Circuit breaker threshold | 5 failures    | Opens after repeated failures      |
-| Circuit breaker timeout   | 60s           | Time before retry                  |
+| Constant             | Value        | Rationale                          |
+| -------------------- | ------------ | ---------------------------------- |
+| Cache TTL            | 300s (5 min) | Per requirements                   |
+| Follower timeout     | 15s          | User-friendly wait time            |
+| Lock TTL             | 60s          | Accommodates slow APIs             |
+| Lock extend interval | 2s           | Keeps lock alive during long calls |
 
 ---
 
@@ -233,15 +274,15 @@ Request → Check Cache → [Hit] → Return cached rate
 
 ### Scenario 1: Slow API Response
 
-The distributed lock auto-extends every 2 seconds, allowing API calls up to 30 seconds without losing the lock. Followers wait up to 15 seconds with exponential backoff retries.
+The distributed lock auto-extends every 2 seconds, allowing API calls up to 60 seconds without losing the lock. Followers wait up to 15 seconds for leader to complete.
 
 ### Scenario 2: API Returns Error
 
-Errors are recorded in the circuit breaker. After 5 consecutive failures, the circuit opens and subsequent requests return stale cached data (if available) instead of hitting the failing API.
+On API errors, the service returns a 503 error to the client. No stale prices are served to ensure data accuracy.
 
 ### Scenario 3: API Timeout
 
-A 30-second timeout protects against hanging connections. On timeout, the failure is recorded and stale cache is returned.
+HTTP client timeouts (10s open, 30s read) protect against hanging connections. On timeout, a 503 error is returned.
 
 ### Scenario 4: Redis Unavailable
 
@@ -260,8 +301,7 @@ dynamic-pricing/
 │       ├── pricing_service.rb          # Main service, API integration
 │       ├── leader_follower_cache.rb    # Caching with coordination
 │       ├── distributed_lock.rb         # Redis-based distributed lock
-│       ├── async_request.rb            # Follower wait mechanism
-│       └── circuit_breaker.rb          # Failure protection
+│       └── async_request.rb            # Follower wait mechanism
 ├── config/
 │   └── routes.rb                       # GET /pricing endpoint
 ├── test/
@@ -272,7 +312,6 @@ dynamic-pricing/
 │   │   └── pricing_flow_test.rb        # End-to-end integration tests
 │   └── services/
 │       ├── async_request_test.rb       # AsyncRequest unit tests
-│       ├── circuit_breaker_test.rb     # CircuitBreaker unit tests
 │       ├── distributed_lock_test.rb    # DistributedLock unit tests
 │       ├── leader_follower_cache_test.rb # Cache unit tests
 │       └── pricing_service_test.rb     # PricingService unit tests
@@ -324,8 +363,8 @@ docker run --rm -v $(pwd):/rails interview-app ./bin/rails test test/controllers
 
 ## Future Improvements
 
-1. **Metrics and monitoring** - Track cache hit rates, API latency, circuit breaker state
-2. **Distributed circuit breaker** - Share circuit breaker state across instances via Redis
+1. **Metrics and monitoring** - Track cache hit rates, API latency, and request patterns
+2. **Circuit breaker** - Add circuit breaker to protect against cascade failures during extended outages
 3. **Cache warming** - Proactively refresh popular cache keys before expiration
 4. **Request batching** - Batch multiple concurrent requests for different parameters into single API call
 5. **Health endpoint** - Add `/health` endpoint for load balancer health checks

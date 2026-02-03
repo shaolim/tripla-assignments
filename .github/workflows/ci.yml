@@ -57,14 +57,5 @@ jobs:
             sleep 3
           fi
         done
-        echo "API endpoint failed after 10 attempts"
-        docker compose logs
+        echo "❌ API endpoint failed after 10 attempts"
         exit 1
-
-    - name: Show logs on failure
-      if: failure()
-      run: docker compose logs
-
-    - name: Stop services
-      if: always()
-      run: docker compose down

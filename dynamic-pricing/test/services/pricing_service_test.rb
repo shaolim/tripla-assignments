@@ -155,20 +155,6 @@ class PricingServiceTest < ActiveSupport::TestCase
     assert_includes error.message, "coordinate"
   end
 
-  test "handles CircuitBreaker error" do
-    @mock_cache.expects(:fetch).raises(CircuitBreaker::CircuitBreakerError.new("open"))
-
-    error = assert_raises(PricingService::Error) do
-      @service.fetch_pricing(
-        period: "Summer",
-        hotel: "FloatingPointResort",
-        room: "SingletonRoom"
-      )
-    end
-
-    assert_includes error.message, "unavailable"
-  end
-
   test "generates consistent cache keys for same parameters" do
     @mock_cache.stubs(:fetch).returns({ "rates" => [{ "rate" => 100 }] })
 

@@ -20,7 +20,6 @@ class AsyncRequest
   # Register this follower in the waiters list
   def register
     redis.lpush("waiters:#{key}", waiter_queue)
-    redis.expire(waiter_queue, timeout + 5) # Grace period
     self
   end
 
