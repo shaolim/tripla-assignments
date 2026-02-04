@@ -4,8 +4,25 @@
 
 # Backend Engineering Take-Home Assignment: Dynamic Pricing Proxy
 
-Welcome to the Tripla backend engineering take-home assignment! This exercise is designed to simulate a real-world problem you might encounter as part of our team.
+## The Challenge
 
+At Tripla, we use a dynamic pricing model for hotel rooms. Instead of static, unchanging rates, our model uses a real-time algorithm to adjust prices based on market demand and other data signals. This helps us maximize both revenue and occupancy.
+
+Our Data and AI team built a powerful model to handle this, but its inference process is computationally expensive to run. To make this product more cost-effective, we analyzed the model's output and found that a calculated room rate remains effective for up to 5 minutes.
+
+This insight presents a great optimization opportunity, and that's where you come in.
+
+### Your Mission
+
+Your mission is to build an efficient service that acts as an intermediary to our dynamic pricing model. This service will be responsible for providing rates to our users while respecting the operational constraints of the expensive model behind it.
+
+### Core Requirements
+
+1. **Integrate the Pricing Model**: Modify the provided service to call the external dynamic pricing API to get the latest rates. The model is available as a Docker image: [tripladev/rate-api](https://hub.docker.com/r/tripladev/rate-api).
+
+2. **Ensure Rate Validity**: A rate fetched from the pricing model is considered valid for 5 minutes. Your service must ensure that any rate it provides for a given set of parameters (`period`, `hotel`, `room`) is no older than this 5-minute window.
+
+3. **Honor API Usage Limits**: The model's API token is limited. Your solution must be able to handle at least 10,000 requests per day from our users while using a single API token for the pricing model.
 ---
 
 ## Solution Overview
@@ -17,7 +34,6 @@ This solution implements a dynamic pricing proxy service that efficiently caches
 - **5-minute caching** - Rates are cached for exactly 5 minutes as required
 - **Leader-Follower pattern** - Prevents duplicate API calls under concurrent load
 - **No stale prices** - Only fresh cached data is served, never outdated prices
-- **User-friendly timeouts** - 15-second timeout instead of indefinite waits
 
 ---
 
@@ -136,6 +152,9 @@ Request → Check Cache → [Miss] → Try Lock → Call API → Cache → Relea
                                     ↓
                               [Locked] → Poll cache every 100ms
 ```
+Sample implementation: 
+- [redis_cache.rb](https://github.com/shaolim/callapi/blob/main/redis_cache.rb)
+- [pricing_service.rb](https://github.com/shaolim/callapi/blob/main/pricing_service.rb)
 
 **Pros:** 
 - Simple to implement
@@ -268,6 +287,11 @@ sequenceDiagram
 | Lock TTL             | 60s          | Accommodates slow APIs             |
 | Lock extend interval | 2s           | Keeps lock alive during long calls |
 
+**Why follower timeout (15s) < lock TTL (60s)?**
+- Lock TTL is a crash safety mechanism — needs buffer for retries and renewals
+- Follower timeout is user-facing — fail fast rather than wait 60s for a crashed leader
+- The 2s extend interval allows ~30 renewal attempts before lock expires
+
 ---
 
 ## Handling Failure Scenarios
@@ -282,11 +306,18 @@ On API errors, the service returns a 503 error to the client. No stale prices ar
 
 ### Scenario 3: API Timeout
 
-HTTP client timeouts (10s open, 30s read) protect against hanging connections. On timeout, a 503 error is returned.
+HTTP client timeouts protect against hanging connections. On timeout, a 503 error is returned.
 
 ### Scenario 4: Redis Unavailable
 
 The service will fail gracefully with a 503 error. In production, Redis should be deployed with replication for high availability.
+
+### Scenario 5: Leader Crashes Mid-Request
+
+If the leader process crashes while fetching from the API:
+
+1. **Followers timeout after 15s** → Return 503 error to users
+2. **Lock auto-expires after 60s** → Allows new leader election
 
 ---
 
@@ -364,36 +395,5 @@ docker run --rm -v $(pwd):/rails interview-app ./bin/rails test test/controllers
 ## Future Improvements
 
 1. **Metrics and monitoring** - Track cache hit rates, API latency, and request patterns
-2. **Circuit breaker** - Add circuit breaker to protect against cascade failures during extended outages
-3. **Cache warming** - Proactively refresh popular cache keys before expiration
-4. **Request batching** - Batch multiple concurrent requests for different parameters into single API call
-5. **Health endpoint** - Add `/health` endpoint for load balancer health checks
-
----
-
-## Original Challenge Description
-
-<details>
-<summary>Click to expand</summary>
-
-### The Challenge
-
-At Tripla, we use a dynamic pricing model for hotel rooms. Instead of static, unchanging rates, our model uses a real-time algorithm to adjust prices based on market demand and other data signals. This helps us maximize both revenue and occupancy.
-
-Our Data and AI team built a powerful model to handle this, but its inference process is computationally expensive to run. To make this product more cost-effective, we analyzed the model's output and found that a calculated room rate remains effective for up to 5 minutes.
-
-This insight presents a great optimization opportunity, and that's where you come in.
-
-### Your Mission
-
-Your mission is to build an efficient service that acts as an intermediary to our dynamic pricing model. This service will be responsible for providing rates to our users while respecting the operational constraints of the expensive model behind it.
-
-### Core Requirements
-
-1. **Integrate the Pricing Model**: Modify the provided service to call the external dynamic pricing API to get the latest rates. The model is available as a Docker image: [tripladev/rate-api](https://hub.docker.com/r/tripladev/rate-api).
-
-2. **Ensure Rate Validity**: A rate fetched from the pricing model is considered valid for 5 minutes. Your service must ensure that any rate it provides for a given set of parameters (`period`, `hotel`, `room`) is no older than this 5-minute window.
-
-3. **Honor API Usage Limits**: The model's API token is limited. Your solution must be able to handle at least 10,000 requests per day from our users while using a single API token for the pricing model.
-
-</details>
+2. **Health endpoint** - Add `/health` endpoint for load balancer health checks
+3. **Redis failure resilience** - Add retry logic and graceful fallback when Redis goes down during lock renewal. Currently, a transient Redis failure crashes the renewal task while work continues, risking two processes holding the lock simultaneously when Redis recovers
